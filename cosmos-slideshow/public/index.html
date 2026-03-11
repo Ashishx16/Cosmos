@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<!-- saved from url=(0065)file:///Users/ashish/Downloads/cosmos-slideshow/public/index.html -->
+<html lang="en"><head><meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Cosmos</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  html, body {
+    width: 100vw; height: 100vh;
+    overflow: hidden;
+    background: #000;
+    cursor: none;
+    font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+  }
+
+  #clock {
+    position: fixed; left: 48px; top: 50%;
+    transform: translateY(-50%);
+    z-index: 20; font-size: 13px; font-weight: 600;
+    letter-spacing: 0.04em; color: #fff;
+  }
+
+  #counter {
+    position: fixed; right: 48px; top: 50%;
+    transform: translateY(-50%);
+    z-index: 20; font-size: 13px; font-weight: 600;
+    letter-spacing: 0.04em; color: #fff;
+  }
+
+  .slot {
+    position: absolute; inset: 60px 120px;
+    display: flex; align-items: center; justify-content: center;
+    transition: opacity 2.5s ease-in-out;
+  }
+  .slot img {
+    max-width: 100%; max-height: 100%;
+    width: auto; height: auto;
+    object-fit: contain; display: block;
+  }
+  .slot.out { opacity: 0; }
+
+  #progress {
+    position: fixed; bottom: 0; left: 0;
+    height: 1px; width: 0%;
+    background: rgba(255,255,255,0.2); z-index: 30;
+  }
+
+  /* Loading / error state */
+  #status {
+    position: fixed; inset: 0;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    color: rgba(255,255,255,0.3);
+    font-size: 12px; font-weight: 600;
+    letter-spacing: 0.15em; text-transform: uppercase;
+    gap: 12px;
+    z-index: 50;
+  }
+  #status.hidden { display: none; }
+  #status-dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: rgba(255,255,255,0.3);
+    animation: pulse 1.5s ease-in-out infinite;
+  }
+  @keyframes pulse {
+    0%, 100% { opacity: 0.3; transform: scale(1); }
+    50%       { opacity: 1;   transform: scale(1.4); }
+  }
+</style>
+</head>
+<body>
+
+  <div id="clock">10:14 PM</div>
+  <div id="counter">· · ·</div>
+  <div class="slot" id="slotA"><img id="imgA" src="file:///Users/ashish/Downloads/cosmos-slideshow/public/index.html" alt=""></div>
+  <div class="slot out" id="slotB"><img id="imgB" src="file:///Users/ashish/Downloads/cosmos-slideshow/public/index.html" alt=""></div>
+  <div id="progress"></div>
+
+  <div id="status">
+    <div id="status-dot"></div>
+    <span id="status-text">No images found — check your board is public</span>
+  </div>
+
+<script>
+  // ── YOUR COSMOS BOARD URL — only line you ever need to change ──
+  const BOARD_URL = "https://www.cosmos.so/ashish.sinha/graphic";
+  // ──────────────────────────────────────────────────────────────
+
+  const SLIDE_DURATION = 45000;  // ms per image
+  const LIST_REFRESH   = 120000; // re-fetch image list every 2 min
+
+  let images = [], idx = 0, active = 'A';
+  let progressStart = null, progressRaf = null;
+
+  // ── Clock ────────────────────────────────────────────────────
+  function updateClock() {
+    const now = new Date();
+    let h = now.getHours();
+    const m = String(now.getMinutes()).padStart(2, '0');
+    const ampm = h >= 12 ? 'PM' : 'AM';
+    h = h % 12 || 12;
+    document.getElementById('clock').textContent = h + ':' + m + ' ' + ampm;
+  }
+  updateClock();
+  setInterval(updateClock, 10000);
+
+  // ── Fetch via Netlify function ───────────────────────────────
+  async function fetchImages() {
+    try {
+      const encoded = encodeURIComponent(BOARD_URL);
+      const res = await fetch(`/.netlify/functions/get-images?board=${encoded}`);
+      const data = await res.json();
+      if (data.images && data.images.length > 0) {
+        images = data.images;
+        document.getElementById('status').classList.add('hidden');
+        console.log('[Cosmos] ' + images.length + ' images loaded');
+      } else {
+        showStatus('No images found — check your board URL');
+      }
+    } catch(e) {
+      showStatus('Connection error — retrying…');
+      console.warn('[Cosmos] fetch error:', e);
+    }
+  }
+
+  function showStatus(msg) {
+    const el = document.getElementById('status');
+    el.classList.remove('hidden');
+    document.getElementById('status-text').textContent = msg;
+  }
+
+  function preload(src) {
+    return new Promise(res => {
+      const img = new Image();
+      img.onload = img.onerror = () => res();
+      img.src = src;
+    });
+  }
+
+  function startProgress() {
+    cancelAnimationFrame(progressRaf);
+    const bar = document.getElementById('progress');
+    bar.style.width = '0%';
+    progressStart = performance.now();
+    function tick(now) {
+      const pct = Math.min(((now - progressStart) / SLIDE_DURATION) * 100, 100);
+      bar.style.width = pct + '%';
+      if (pct < 100) progressRaf = requestAnimationFrame(tick);
+    }
+    progressRaf = requestAnimationFrame(tick);
+  }
+
+  async function showSlide(src, num) {
+    const next     = active === 'A' ? 'B' : 'A';
+    const nextImg  = document.getElementById('img' + next);
+    const nextSlot = document.getElementById('slot' + next);
+    const currSlot = document.getElementById('slot' + active);
+
+    await preload(src);
+    nextImg.src = src;
+    nextSlot.classList.remove('out');
+    void nextSlot.offsetWidth;
+    setTimeout(() => currSlot.classList.add('out'), 80);
+    active = next;
+
+    document.getElementById('counter').textContent =
+      String(num + 1).padStart(2, '0') + '/' + String(images.length).padStart(3, '0');
+    startProgress();
+  }
+
+  async function run() {
+    await fetchImages();
+
+    if (images.length === 0) {
+      showStatus('No images found — check your board is public');
+      return;
+    }
+
+    // Show first image
+    await preload(images[0]);
+    document.getElementById('imgA').src = images[0];
+    document.getElementById('slotA').classList.remove('out');
+    document.getElementById('status').classList.add('hidden');
+    document.getElementById('counter').textContent =
+      '01/' + String(images.length).padStart(3, '0');
+    startProgress();
+
+    // Cycle slides
+    setInterval(async () => {
+      idx = (idx + 1) % images.length;
+      await showSlide(images[idx], idx);
+    }, SLIDE_DURATION);
+
+    // Refresh image list for new additions
+    setInterval(fetchImages, LIST_REFRESH);
+  }
+
+  run();
+</script>
+
+
+</body></html>
